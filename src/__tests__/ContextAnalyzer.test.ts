@@ -104,6 +104,33 @@ describe('ContextAnalyzer', () => {
             expect(report.dependencyGraph.nodes.size).toBe(0);
             expect(report.dependencyGraph.edges.size).toBe(0);
         });
+        
+        test('detects file organization patterns', async () => {
+            const testFiles = [
+                { 
+                    path: '/modules/auth.ts',
+                    content: 'code',
+                    size: 100,
+                    language: 'typescript',
+                    lastModified: new Date()
+                },
+                {
+                    path: '/services/api.service.ts',
+                    content: 'code',
+                    size: 100,
+                    language: 'typescript',
+                    lastModified: new Date()
+                }
+            ];
+        
+            mockSnapshot.getFiles.mockReturnValue(testFiles);
+            mockSnapshot.getFilesByPattern.mockImplementation((pattern: RegExp) => testFiles.filter(f => pattern.test(f.path)));
+        
+            const report = await analyzer.analyzeContext(mockSnapshot);
+            expect(report.architecturalStyle.patterns.modular).toBeGreaterThan(0);
+            expect(report.architecturalStyle.patterns.microservices).toBe(1);
+            expect(report.architecturalStyle.patterns.eventDriven).toBe(0);
+        });
     });
 
     describe('dispose', () => {
