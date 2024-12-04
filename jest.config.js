@@ -4,10 +4,10 @@ module.exports = {
   testMatch: ['**/__tests__/**/*.test.ts'],
   moduleFileExtensions: ['ts', 'js'],
   transform: {
-      '^.+\\.ts$': 'ts-jest',
+    '^.+\\.ts$': 'ts-jest',
   },
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
   moduleNameMapper: {
-      '^vscode$': '<rootDir>/node_modules/@types/vscode'
+    '^vscode$': '<rootDir>/src/__mocks__/vscode.ts'
   }
 };
