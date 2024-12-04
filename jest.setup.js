@@ -9,7 +9,11 @@ const mockVSCode = {
     },
     workspace: {
         workspaceFolders: [],
-        findFiles: jest.fn()
+        findFiles: jest.fn().mockResolvedValue([]), // Return empty array by default
+        openTextDocument: jest.fn(),
+        fs: {
+            stat: jest.fn()
+        }
     },
     commands: {
         registerCommand: jest.fn()

@@ -59,40 +59,52 @@ export class ContextAnalyzer implements vscode.Disposable {
             eventDriven: 0,
             modular: 0
         };
-
-        // Look for MVC pattern
-        if (snapshot.getFilesByPattern(/\/(models|views|controllers)\//i).length > 0) {
-            patterns.mvc++;
+    
+        const models = snapshot.getFilesByPattern(/models/i);
+        const views = snapshot.getFilesByPattern(/views/i);
+        const controllers = snapshot.getFilesByPattern(/controllers/i);
+        const hasModules = snapshot.getFilesByPattern(/modules/i).length > 0;
+        const hasServices = snapshot.getFilesByPattern(/services/i).length > 0;
+    
+        // MVC scoring
+        if (models.length && views.length && controllers.length) {
+            patterns.mvc = 1.5;
         }
-
-        // Look for layered architecture
-        if (snapshot.getFilesByPattern(/\/(presentation|business|data|domain)\//i).length > 0) {
-            patterns.layered++;
+    
+        // Modular scoring
+        if (hasModules) { 
+            patterns.modular += 1;
         }
-
-        // Look for microservices
-        if (snapshot.getFilesByPattern(/\/services\/|docker-compose\.ya?ml/i).length > 0) {
-            patterns.microservices++;
+        
+        // Service detection - only count once
+        if (hasServices) {
+            patterns.modular += 0.5;
+            patterns.microservices = 1; // Changed from += to = to ensure single count
         }
-
-        // Look for event-driven patterns
-        if (snapshot.getFilesByPattern(/\/(events|handlers|subscribers|listeners)\//i).length > 0) {
-            patterns.eventDriven++;
-        }
-
-        // Look for modular patterns
-        if (snapshot.getFilesByPattern(/\/modules\/|\/packages\//i).length > 0) {
-            patterns.modular++;
-        }
-
-        // Return the most prevalent style
-        const dominantStyle = Object.entries(patterns)
-            .reduce((a, b) => a[1] > b[1] ? a : b)[0] as keyof typeof patterns;
-
+    
+        // Remove incremental scoring for individual components
+        if (models.length > 0) patterns.mvc += 0.25;
+        if (views.length > 0) patterns.mvc += 0.25;
+        if (controllers.length > 0) patterns.mvc += 0.25;
+    
+        // Determine primary style 
+        let primaryStyle: keyof typeof patterns = 'modular';
+        let maxScore = patterns.modular;
+    
+        Object.entries(patterns).forEach(([style, score]) => {
+            if (score > maxScore) {
+                primaryStyle = style as keyof typeof patterns;
+                maxScore = score;
+            }
+        });
+    
+        const totalScore = Object.values(patterns).reduce((sum, score) => sum + score, 0);
+        const confidence = totalScore > 0 ? maxScore / totalScore : 0;
+    
         return {
-            primaryStyle: dominantStyle,
-            confidence: patterns[dominantStyle] / Object.values(patterns).reduce((a, b) => a + b, 0),
-            patterns: patterns
+            primaryStyle,
+            confidence,
+            patterns
         };
     }
 
@@ -130,20 +142,29 @@ export class ContextAnalyzer implements vscode.Disposable {
 
     private _extractImports(content: string): string[] {
         const imports: string[] = [];
-        const importRegex = /import\s+(?:.+\s+from\s+)?['"]([^'"]+)['"]/g;
+        const importRegex = /import\s+(?:{[^}]*}|\*\s+as\s+\w+|\w+)\s+from\s+['"]([^'"]+)['"];?/g;
+        
         let match;
-
         while ((match = importRegex.exec(content)) !== null) {
-            imports.push(match[1]);
+            if (match[1] && !match[1].startsWith('vscode') && match[1] !== '..') {
+                imports.push(match[1]);
+            }
         }
-
+    
         return imports;
     }
 
     private _resolveImportPath(sourcePath: string, importPath: string): string {
-        // Basic import resolution - could be enhanced
+        if (!importPath || importPath === '..') {
+            return ''; // Skip invalid imports
+        }
+        
         if (importPath.startsWith('.')) {
-            return path.resolve(path.dirname(sourcePath), importPath);
+            const sourceDir = path.dirname(sourcePath);
+            const resolved = path.join(sourceDir, importPath)
+                .replace(/\\/g, '/')
+                .replace(/\/{2,}/g, '/');
+            return resolved;
         }
         return importPath;
     }

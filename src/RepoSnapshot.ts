@@ -14,43 +14,46 @@ export class RepoSnapshot implements vscode.Disposable {
     ) {}
 
     public async capture(): Promise<void> {
-        // Exclude common binary and dependency files
-        const excludePattern = '**/{'
-            + 'node_modules,'
-            + '.git,'
-            + 'dist,'
-            + 'build,'
-            + '*.exe,'
-            + '*.dll,'
-            + '*.so,'
-            + '*.dylib,'
-            + '*.png,'
-            + '*.jpg,'
-            + '*.jpeg'
-            + '}/**';
-
-        const files = await vscode.workspace.findFiles('**/*', excludePattern);
-        
-        for (const file of files) {
-            try {
-                const document = await vscode.workspace.openTextDocument(file);
-                const relativePath = path.relative(this.rootPath, file.fsPath);
-                const stats = await vscode.workspace.fs.stat(file);
-
-                this._files.set(relativePath, {
-                    path: relativePath,
-                    content: document.getText(),
-                    size: document.getText().length,
-                    language: document.languageId,
-                    lastModified: new Date(stats.mtime)
-                });
-            } catch (error) {
-                console.warn(`Failed to capture file ${file.fsPath}:`, error);
+        try {
+            const excludePattern = '**/{'
+                + 'node_modules,'
+                + '.git,'
+                + 'dist,'
+                + 'build,'
+                + '*.exe,'
+                + '*.dll,'
+                + '*.so,'
+                + '*.dylib,'
+                + '*.png,'
+                + '*.jpg,'
+                + '*.jpeg'
+                + '}/**';
+    
+            const files = await vscode.workspace.findFiles('**/*', excludePattern);
+            
+            for (const file of files) {
+                try {
+                    const document = await vscode.workspace.openTextDocument(file);
+                    const relativePath = path.relative(this.rootPath, file.fsPath);
+                    const stats = await vscode.workspace.fs.stat(file);
+    
+                    this._files.set(relativePath, {
+                        path: relativePath,
+                        content: document.getText(),
+                        size: document.getText().length,
+                        language: document.languageId,
+                        lastModified: stats?.mtime ? new Date(stats.mtime) : new Date()
+                    });
+                } catch (error) {
+                    console.warn(`Failed to capture file ${file.fsPath}:`, error);
+                }
             }
+    
+            await this._detectPatterns();
+        } catch (error) {
+            console.error('Error in RepoSnapshot.capture:', error);
+            throw error;
         }
-
-        // Initial pattern detection
-        await this._detectPatterns();
     }
 
     private async _detectPatterns(): Promise<void> {

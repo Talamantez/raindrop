@@ -14,7 +14,8 @@ export class SpecAnalyzer implements vscode.Disposable {
         this._statusBar = vscode.window.createStatusBarItem(
             vscode.StatusBarAlignment.Left
         );
-        this._disposables.push(this._statusBar);
+        this._disposables = [this._contextAnalyzer, this._statusBar];
+        // Initialize _disposables before using it
     }
 
     public async analyzeRepo(): Promise<AnalysisResult> {
@@ -113,6 +114,16 @@ export class SpecAnalyzer implements vscode.Disposable {
     }
 
     public dispose(): void {
-        this._disposables.forEach(d => d.dispose());
+        if (this._disposables) {
+            this._disposables.forEach(d => {
+                if (d && typeof d.dispose === 'function') {
+                    try {
+                        d.dispose();
+                    } catch (error) {
+                        console.warn('Error disposing:', error);
+                    }
+                }
+            });
+        }
     }
 }
