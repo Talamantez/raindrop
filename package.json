@@ -1,0 +1,38 @@
+{
+  "name": "raindrop",
+  "displayName": "Raindrop",
+  "version": "0.1.0",
+  "activationEvents": [
+    "onCommand:repo-scaffold.analyze",
+    "onCommand:repo-scaffold.generateReport"
+  ],
+  "engines": {
+    "vscode": "^1.86.0"
+  },
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "repo-scaffold.analyze",
+        "title": "Analyze Repository"
+      },
+      {
+        "command": "repo-scaffold.generateReport",
+        "title": "Generate Scaffold Report"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "lint": "eslint src --ext ts",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.86.0",
+    "@typescript-eslint/eslint-plugin": "^6.9.0",
+    "@typescript-eslint/parser": "^6.9.0",
+    "typescript": "^5.2.2"
+  }
+}
