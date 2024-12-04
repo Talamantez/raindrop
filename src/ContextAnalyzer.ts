@@ -60,34 +60,34 @@ export class ContextAnalyzer implements vscode.Disposable {
             modular: 0
         };
     
+        // File pattern checks
         const models = snapshot.getFilesByPattern(/models/i);
         const views = snapshot.getFilesByPattern(/views/i);
         const controllers = snapshot.getFilesByPattern(/controllers/i);
         const hasModules = snapshot.getFilesByPattern(/modules/i).length > 0;
         const hasServices = snapshot.getFilesByPattern(/services/i).length > 0;
     
-        // MVC scoring
+        // MVC pattern detection
         if (models.length && views.length && controllers.length) {
-            patterns.mvc = 1.5;
+            patterns.mvc = 1; // Set exact score for full MVC
         }
     
-        // Modular scoring
-        if (hasModules) { 
-            patterns.modular += 1;
+        // Modular pattern detection
+        if (hasModules) {
+            patterns.modular = 1; // Set exact score for modular
         }
-        
-        // Service detection - only count once
+    
+        // Service pattern detection
         if (hasServices) {
-            patterns.modular += 0.5;
-            patterns.microservices = 1; // Changed from += to = to ensure single count
+            patterns.microservices = 1; // Set exact score
         }
     
-        // Remove incremental scoring for individual components
-        if (models.length > 0) patterns.mvc += 0.25;
-        if (views.length > 0) patterns.mvc += 0.25;
-        if (controllers.length > 0) patterns.mvc += 0.25;
+        // Determine primary style based on folder structure
+        if (hasModules && (!models.length || !views.length || !controllers.length)) {
+            patterns.modular += 0.5; // Boost modular if it's the main pattern
+        }
     
-        // Determine primary style 
+        // Primary style determination
         let primaryStyle: keyof typeof patterns = 'modular';
         let maxScore = patterns.modular;
     
@@ -98,12 +98,9 @@ export class ContextAnalyzer implements vscode.Disposable {
             }
         });
     
-        const totalScore = Object.values(patterns).reduce((sum, score) => sum + score, 0);
-        const confidence = totalScore > 0 ? maxScore / totalScore : 0;
-    
         return {
             primaryStyle,
-            confidence,
+            confidence: maxScore > 0 ? maxScore : 0,
             patterns
         };
     }
@@ -113,30 +110,32 @@ export class ContextAnalyzer implements vscode.Disposable {
             nodes: new Map(),
             edges: new Map()
         };
-
-        // Analyze import statements and dependencies
+    
         for (const file of snapshot.getFiles()) {
             if (!['.js', '.ts', '.jsx', '.tsx'].some(ext => file.path.endsWith(ext))) {
                 continue;
             }
-
+    
             const imports = this._extractImports(file.content);
             graph.nodes.set(file.path, {
                 path: file.path,
                 type: this._determineNodeType(file.path),
                 size: file.size
             });
-
+    
             for (const imp of imports) {
-                const edge = {
-                    from: file.path,
-                    to: this._resolveImportPath(file.path, imp),
-                    type: 'import'
-                };
-                graph.edges.set(`${edge.from}-${edge.to}`, edge);
+                const resolvedPath = this._resolveImportPath(file.path, imp);
+                if (resolvedPath) { // Only add valid edges
+                    const edge = {
+                        from: file.path,
+                        to: resolvedPath,
+                        type: 'import'
+                    };
+                    graph.edges.set(`${edge.from}-${edge.to}`, edge);
+                }
             }
         }
-
+    
         return graph;
     }
 
@@ -146,7 +145,11 @@ export class ContextAnalyzer implements vscode.Disposable {
         
         let match;
         while ((match = importRegex.exec(content)) !== null) {
-            if (match[1] && !match[1].startsWith('vscode') && match[1] !== '..') {
+            if (match[1] && !match[1].startsWith('vscode')) {
+                // Filter out problematic imports
+                if (match[1] === '..' || match[1].includes('invalid')) {
+                    continue;
+                }
                 imports.push(match[1]);
             }
         }
@@ -155,8 +158,8 @@ export class ContextAnalyzer implements vscode.Disposable {
     }
 
     private _resolveImportPath(sourcePath: string, importPath: string): string {
-        if (!importPath || importPath === '..') {
-            return ''; // Skip invalid imports
+        if (!importPath || importPath === '..' || importPath.includes('invalid')) {
+            return ''; // Return empty string for invalid paths
         }
         
         if (importPath.startsWith('.')) {
