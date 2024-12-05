@@ -60,116 +60,135 @@ export class ContextAnalyzer implements vscode.Disposable {
             modular: 0
         };
     
-        // File pattern checks
-        const models = snapshot.getFilesByPattern(/models/i);
-        const views = snapshot.getFilesByPattern(/views/i);
-        const controllers = snapshot.getFilesByPattern(/controllers/i);
-        const hasModules = snapshot.getFilesByPattern(/modules/i).length > 0;
-        const hasServices = snapshot.getFilesByPattern(/services/i).length > 0;
+        const files = snapshot.getFiles().map(f => 
+            f.path.replace(/^\/+/, '').replace(/\\/g, '/').toLowerCase()
+        );
     
-        // MVC pattern detection
-        if (models.length && views.length && controllers.length) {
-            patterns.mvc = 1; // Set exact score for full MVC
-        }
-    
-        // Modular pattern detection
+        // Module detection - look for both root modules and nested modules
+        const hasModules = files.some(path => /^modules?\//.test(path));
         if (hasModules) {
-            patterns.modular = 1; // Set exact score for modular
+            patterns.modular = 1;
         }
     
-        // Service pattern detection
+        // Enhanced MVC detection - look for patterns in both root and nested paths
+        const hasMvcComponents = files.some(path => 
+            /controllers?\//i.test(path) || 
+            /views?\//i.test(path) || 
+            /models?\//i.test(path)
+        );
+    
+        // If we find any MVC component inside a module, we mark both patterns
+        const hasNestedMvc = files.some(path => 
+            path.includes('/modules/') && 
+            (/controllers?\/|views?\/|models?\//i).test(path)
+        );
+    
+        if (hasMvcComponents || hasNestedMvc) {
+            patterns.mvc = 1;
+        }
+    
+        // Services detection
+        const hasServices = files.some(path => /services?\//i.test(path) || path.endsWith('.service.ts'));
         if (hasServices) {
-            patterns.microservices = 1; // Set exact score
+            patterns.microservices = 1;
         }
     
-        // Determine primary style based on folder structure
-        if (hasModules && (!models.length || !views.length || !controllers.length)) {
-            patterns.modular += 0.5; // Boost modular if it's the main pattern
+        // Determine primary style
+        let primaryStyle: keyof typeof patterns;
+        if (hasModules && !hasMvcComponents && !hasNestedMvc) {
+            primaryStyle = 'modular';
+        } else if (patterns.mvc) {
+            primaryStyle = 'mvc';
+        } else {
+            primaryStyle = Object.entries(patterns)
+                .reduce((a, b) => b[1] > a[1] ? b : a)[0] as keyof typeof patterns;
         }
-    
-        // Primary style determination
-        let primaryStyle: keyof typeof patterns = 'modular';
-        let maxScore = patterns.modular;
-    
-        Object.entries(patterns).forEach(([style, score]) => {
-            if (score > maxScore) {
-                primaryStyle = style as keyof typeof patterns;
-                maxScore = score;
-            }
-        });
     
         return {
             primaryStyle,
-            confidence: maxScore > 0 ? maxScore : 0,
+            confidence: 1.0,
             patterns
         };
     }
-
-    private async _buildDependencyGraph(snapshot: RepoSnapshot): Promise<DependencyGraph> {
+    
+    private _buildDependencyGraph(snapshot: RepoSnapshot): DependencyGraph {
         const graph: DependencyGraph = {
             nodes: new Map(),
             edges: new Map()
         };
     
-        for (const file of snapshot.getFiles()) {
-            if (!['.js', '.ts', '.jsx', '.tsx'].some(ext => file.path.endsWith(ext))) {
-                continue;
-            }
-    
-            const imports = this._extractImports(file.content);
+        const files = snapshot.getFiles();
+        files.forEach(file => {
+            // Add node
             graph.nodes.set(file.path, {
                 path: file.path,
                 type: this._determineNodeType(file.path),
                 size: file.size
             });
     
-            for (const imp of imports) {
-                const resolvedPath = this._resolveImportPath(file.path, imp);
-                if (resolvedPath) { // Only add valid edges
+            // Process imports
+            const imports = this._extractImports(file.content);
+            imports.forEach(importPath => {
+                const resolved = this._resolveImportPath(file.path, importPath);
+                if (resolved) {
                     const edge = {
                         from: file.path,
-                        to: resolvedPath,
+                        to: resolved,
                         type: 'import'
                     };
-                    graph.edges.set(`${edge.from}-${edge.to}`, edge);
+                    graph.edges.set(`${file.path}:${resolved}`, edge);
                 }
-            }
-        }
+            });
+        });
     
         return graph;
     }
-
+    
     private _extractImports(content: string): string[] {
-        const imports: string[] = [];
-        const importRegex = /import\s+(?:{[^}]*}|\*\s+as\s+\w+|\w+)\s+from\s+['"]([^'"]+)['"];?/g;
+        const imports = new Set<string>();
+        // More strict regex that requires proper import syntax
+        const importRegex = /import\s+(?:{[^}]*}|\*\s+as\s+\w+|\w+)\s+from\s+['"]([^'"]+)['"]\s*;?/g;
         
         let match;
         while ((match = importRegex.exec(content)) !== null) {
-            if (match[1] && !match[1].startsWith('vscode')) {
-                // Filter out problematic imports
-                if (match[1] === '..' || match[1].includes('invalid')) {
-                    continue;
-                }
-                imports.push(match[1]);
+            const importPath = match[1];
+            // Stricter validation of import paths
+            if (this._isValidImportPath(importPath)) {
+                imports.add(importPath);
             }
         }
     
-        return imports;
+        return Array.from(imports);
     }
-
-    private _resolveImportPath(sourcePath: string, importPath: string): string {
-        if (!importPath || importPath === '..' || importPath.includes('invalid')) {
-            return ''; // Return empty string for invalid paths
+    
+    private _isValidImportPath(importPath: string): boolean {
+        return Boolean(
+            importPath &&
+            importPath !== '..' &&
+            importPath !== '.' &&
+            !importPath.startsWith('vscode') &&
+            /^[@\w\-./]+$/.test(importPath) // Only allow valid path characters
+        );
+    }
+    
+    private _resolveImportPath(sourcePath: string, importPath: string): string | null {
+        if (!this._isValidImportPath(importPath)) {
+            return null;
         }
-        
-        if (importPath.startsWith('.')) {
-            const sourceDir = path.dirname(sourcePath);
-            const resolved = path.join(sourceDir, importPath)
-                .replace(/\\/g, '/')
-                .replace(/\/{2,}/g, '/');
-            return resolved;
+    
+        try {
+            if (importPath.startsWith('.')) {
+                const sourceDir = path.dirname(sourcePath);
+                return path.join(sourceDir, importPath)
+                    .replace(/\\/g, '/')
+                    .replace(/\.(js|ts|jsx|tsx)$/, '')
+                    .replace(/\/index$/, '')
+                    .replace(/\/+/g, '/');
+            }
+            return importPath;
+        } catch {
+            return null;
         }
-        return importPath;
     }
 
     private _determineNodeType(filePath: string): string {

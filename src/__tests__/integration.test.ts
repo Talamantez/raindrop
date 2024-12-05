@@ -35,8 +35,44 @@ describe('Integration Tests', () => {
             getFiles: jest.fn().mockReturnValue([]),
             getFilesByPattern: jest.fn().mockReturnValue([]),
             capture: jest.fn().mockResolvedValue(undefined),
-            dispose: jest.fn()
+            dispose: jest.fn(),
+            _files: new Map()  // Add internal storage
         } as any as RepoSnapshot;
+
+        const mockFiles = [
+            {
+                path: 'src/models/User.ts',
+                content: 'export class User {}',
+                size: 100,
+                language: 'typescript'
+            },
+            {
+                path: 'src/controllers/UserController.ts',
+                content: 'import { User } from "../models/User";',
+                size: 200,
+                language: 'typescript'
+            },
+            {
+                path: 'src/views/UserView.tsx',
+                content: 'import { User } from "../models/User";',
+                size: 300,
+                language: 'typescript'
+            }
+        ];
+
+        // Set up the mock data correctly
+        (mockSnapshot.getFiles as jest.Mock).mockReturnValue(mockFiles);
+        (mockSnapshot.capture as jest.Mock).mockImplementation(async () => {
+            mockFiles.forEach(file => {
+                (mockSnapshot as any)._files.set(file.path, file);
+            });
+            return { files: mockFiles };
+        });
+
+        // Implement getFilesByPattern correctly
+        (mockSnapshot.getFilesByPattern as jest.Mock).mockImplementation((pattern: RegExp) => {
+            return mockFiles.filter(f => pattern.test(f.path));
+        });
 
         // Setup mock status bar
         const mockStatusBar = {
@@ -75,7 +111,7 @@ describe('Integration Tests', () => {
                 {
                     path: 'src/models/User.ts',
                     content: 'export class User {}',
-                    size: 100, 
+                    size: 100,
                     language: 'typescript'
                 },
                 {
@@ -133,11 +169,11 @@ describe('Integration Tests', () => {
 
     test('error propagation', async () => {
         const mockError = new Error('Mock error');
-        
+
         // Mock the entire snapshot to fail
         jest.spyOn(RepoSnapshot.prototype, 'capture')
             .mockRejectedValueOnce(mockError);
-    
+
         await expect(specAnalyzer.analyzeRepo())
             .rejects
             .toThrow('Mock error');
